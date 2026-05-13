@@ -1,0 +1,22 @@
+{
+    "name": "p7h/nas-file-manager",
+    "description": "NAS folder-structure schema viewer and live file manager for Laravel",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "P7H\\NasFileManager\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "P7H\\NasFileManager\\NasFileManagerServiceProvider"
+            ]
+        }
+    },
+    "require": {
+        "php": "^8.1",
+        "illuminate/support": "^10.0|^11.0|^12.0"
+    }
+}
