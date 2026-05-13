@@ -1,6 +1,6 @@
 # p7h/nas-file-manager
 
-A Laravel package that embeds a NAS file manager directly into your Blade views. Supports SFTP, FTP, FTPS, and SMB protocols. Includes a built-in Connection tab for first-time setup — no configuration required to get started.
+A Laravel package that embeds a NAS file manager directly into your Blade views. Supports SFTP, FTP, FTPS, and SMB protocols. Includes a built-in Connection tab for first-time setup — configure and save credentials from the UI with no manual file editing required.
 
 ---
 
@@ -16,9 +16,10 @@ A Laravel package that embeds a NAS file manager directly into your Blade views.
 
 ```bash
 composer require p7h/nas-file-manager
+php artisan migrate
 ```
 
-Laravel auto-discovers the service provider. No manual registration needed.
+`composer require` auto-discovers the service provider and installs system dependencies. `migrate` creates the `nas_fm_connections` table used to store saved connections.
 
 ---
 
@@ -47,39 +48,69 @@ Include the component anywhere inside an authenticated Blade view:
 @include('nas-file-manager::file-manager')
 ```
 
-If `NAS_HOST` is not set, the component opens automatically to the **Connection tab** so you can enter and test credentials before saving them to `.env`.
+If no connection is configured the component **auto-expands** and opens the **Connection tab** so you can enter credentials, test the connection, and save — all from the UI.
 
 ---
 
-## Configuration
+## Credential Storage
 
-### 1. Publish the config (optional)
+The package supports two ways to persist connection credentials. The **database** is the recommended approach.
+
+### Priority order
+
+When loading a connection, the package checks sources in this order:
+
+1. **Database** (`nas_fm_connections` table) — if the table has rows, these are used exclusively
+2. **Config** (`config/nas-file-manager.php` `connections` array) — used if the table is empty
+3. **Legacy `.env`** (`NAS_HOST`, `NAS_USERNAME`, etc.) — used as a final fallback
+
+### Save to Database *(recommended)*
+
+Saves credentials directly from the Connection tab UI into the `nas_fm_connections` table.
+
+- Works for **all connections**, including multiple ones
+- Passwords are stored **encrypted** using Laravel's `encrypt()` — never in plaintext
+- Survives `.env` resets and deployments
+- No file system access required
+- The **Save to DB** button label becomes **Update** after the first save
+
+Run the migration once to create the table:
+
+```bash
+php artisan migrate
+```
+
+### Save to .env
+
+Writes `NAS_*` variables directly to your `.env` file from the Connection tab UI.
+
+- Supports the **primary (first) connection only**
+- Calls `config:clear` automatically after writing
+- Requires the `.env` file to be writable by the web server
+- A page reload is needed for changes to take effect
+- Use this if you manage credentials outside the app (CI secrets, Docker env, etc.)
+
+The `.env` variables written are:
+
+```env
+NAS_ENABLED=true
+NAS_PROTOCOL=sftp          # sftp | ftp | ftps | smb
+NAS_HOST=192.168.1.100
+NAS_PORT=22
+NAS_USERNAME=admin
+NAS_PASSWORD=secret        # only written if a new password is entered
+NAS_PATH=/media
+NAS_SMB_SHARE=media        # SMB only
+NAS_SMB_DOMAIN=WORKGROUP   # SMB only
+```
+
+### Manual config (advanced)
+
+If you prefer to manage connections in code, publish the config and add entries to the `connections` array:
 
 ```bash
 php artisan vendor:publish --tag=nas-file-manager-config
 ```
-
-Copies `config/nas-file-manager.php` into your project for customisation, including adding multiple connections.
-
-### 2. Add to `.env`
-
-```env
-NAS_ENABLED=true           # enable or disable the primary connection (default: true)
-NAS_PROTOCOL=sftp          # sftp | ftp | ftps | smb  (default: sftp)
-NAS_HOST=192.168.1.100     # IP address or hostname
-NAS_PORT=22                # 22=sftp, 21=ftp/ftps, 445=smb
-NAS_USERNAME=admin
-NAS_PASSWORD=secret
-NAS_PATH=/media            # starting subdirectory on the NAS (default: /media)
-
-# SMB only
-NAS_SMB_SHARE=media        # share name (required for smb)
-NAS_SMB_DOMAIN=WORKGROUP   # domain or workgroup
-```
-
-### 3. Multiple connections (published config only)
-
-After publishing the config, add extra entries to the `connections` array:
 
 ```php
 // config/nas-file-manager.php
@@ -109,7 +140,7 @@ After publishing the config, add extra entries to the `connections` array:
 ],
 ```
 
-The first **enabled** connection is used by the Live Browser tab.
+> Config-defined connections are ignored once any row exists in `nas_fm_connections`. Save to database or keep the table empty if you want config to take effect.
 
 ---
 
@@ -117,116 +148,117 @@ The first **enabled** connection is used by the Live Browser tab.
 
 ### Schema
 
-Displays a static folder tree defined in config or passed as `$nodes`. Useful for documenting your expected NAS structure without making a live connection. No credentials needed.
+Displays a static folder tree defined in config or passed as `$nodes`. Documents the expected NAS structure without making a live connection. No credentials needed.
 
 ### Live Browser
 
-Connects to the first enabled NAS connection and lets you navigate folders, create new folders, rename, and delete — subject to the `edit_gate` setting.
+Connects to the first **enabled** connection and lets you navigate folders, create new folders, rename, and delete — subject to the `edit_gate` setting.
 
 ### Connection
 
-Manage all your NAS connections from the UI. Supports multiple connections, live testing, an enable/disable toggle per connection, and a visual subdirectory picker.
+Manage all NAS connections from the UI. Supports multiple connections, live credential testing, enable/disable per connection, a visual subdirectory picker, and saving to database or `.env`.
 
 ---
 
 ## Connection Tab
 
-### First install — no `.env` set
+### First time — no connection saved
 
-When `NAS_HOST` is empty the component:
+When no credentials are saved the component:
 
 - **Auto-expands** the accordion on page load
 - **Pre-selects** the Connection tab
 - Shows an amber **"Setup required"** badge in the header
 - Displays a setup notice with instructions
 
-Fill in your credentials, click **Test Connection**, confirm it works, then copy the values into your `.env`.
+Fill in credentials → **Test** → confirm green → **Save to DB** (or **Save to .env**).
 
-### After `.env` is configured
+### After a connection is saved
 
 - The accordion is **collapsed by default** — unobtrusive
 - The component opens to the **Schema** tab
-- The Connection tab is still accessible at any time for debugging or changes
+- The Connection tab remains accessible at any time for changes or debugging
 
 ### Connection cards
 
-Each NAS connection is shown as a collapsible card. The collapsed header shows:
+Each NAS connection is a collapsible card. The collapsed header shows:
 
-- Connection name (editable inline)
-- Protocol badge
-- Host address
-- Test status dot (green = ok, red = failed, amber = testing)
-- Enable / disable toggle
+| Element | Description |
+|---|---|
+| Connection name | Editable inline — click to rename |
+| Protocol badge | `sftp` / `ftp` / `ftps` / `smb` |
+| Host address | Shown when set |
+| Test status dot | Green = ok · Red = failed · Amber = testing |
+| Enable / disable toggle | iOS-style — flip without expanding the card |
 
 Expanding a card reveals the full form.
 
 ### Enable / disable toggle
 
-Each connection has an iOS-style toggle in the card header. Flip it without expanding the card.
-
-- **Green (on)** — connection is active; the Live Browser uses the first enabled connection
-- **Grey (off)** — connection is inactive and ignored by the Live Browser
+- **Green (on)** — connection is active; the Live Browser uses the first enabled one
+- **Grey (off)** — connection is inactive and ignored everywhere
 
 ### Connection form fields
 
 | Field | Notes |
 |---|---|
 | Protocol | `sftp` / `ftp` / `ftps` / `smb` — switching auto-suggests the default port (22 / 21 / 445) |
-| Host | IP address or hostname — required to test |
+| Host | IP address or hostname — required to test or save |
 | Port | Auto-filled on protocol change; editable |
 | Username | |
-| Password | Leave blank to use the saved `.env` password; a hint appears when a saved password exists |
+| Password | Leave blank to keep the saved password; a hint confirms when one is already stored |
 | Share | SMB only — the share name on the server (required for SMB) |
 | Domain | SMB only — workgroup or Windows domain |
 | Subdirectory | Starting directory on the NAS for the Live Browser |
 
 ### Subdirectory browser
 
-The **Subdirectory** field has a **Browse** button. Clicking it opens an inline file picker directly below the field:
+The **Subdirectory** field has a **Browse** button that opens an inline file picker:
 
-- Connects to the NAS using the credentials currently entered in the card (before saving)
-- Browses from the **NAS root** — not the current subdirectory — so you can pick any path
-- Shows only folders (files are hidden)
-- Has breadcrumb navigation to go deeper into the tree
-- Hovering a folder reveals a green **Select** button; clicking it sets the subdirectory instantly
-- The **Select /current/path** button in the toolbar selects the currently browsed level
-- Click **Browse** again (now labelled **Close**) to dismiss the picker without changing anything
+- Uses the credentials currently entered in the card (before saving)
+- Browses from the **NAS root** so you can pick any path
+- Shows folders only
+- Breadcrumb navigation to go deeper
+- Hover a row → green **Select** button appears; clicking sets the subdirectory instantly
+- **Select /current/path** button in the toolbar selects the currently browsed level
+- Click **Close** to dismiss without changing anything
 
 ### Test Connection
 
-Clicking **Test Connection** on a card sends the form values to `POST /nas-file-manager/test` as live credential overrides. The result appears inline below the form:
+Sends the form values to `POST /nas-file-manager/test` as live credential overrides:
 
 - **Green ✓** — connected successfully
 - **Red ✗** — failed, with a plain-English error (wrong password, unreachable host, access denied, etc.)
-- Leaving the password blank falls back to the password stored in `.env` / config
+- Leaving the password blank falls back to the already-saved password
 
 ### Saving credentials
 
-Each connection card has a **Save** split button with two options:
+Each card has a **Save** split button:
 
-#### Save to Database *(recommended)*
+- **Primary button** — saves to the database (or updates if already saved)
+- **Chevron ▾** — opens a dropdown with both options and a description of each
 
-Stores the connection in the `nas_fm_connections` table (created automatically by the package migration). The package reads from this table on every page load, so connections survive deployments and `.env` resets. Passwords are stored **encrypted** using Laravel's `encrypt()`.
+#### Save to Database
 
-- Works for **all connections**, including multiple ones
-- No `.env` changes required
-- The button label changes to **Update** once a connection has been saved
-- Run `php artisan migrate` once after installing the package to create the table
+Click the primary button or choose from the dropdown. On success:
+
+- The result banner shows green with a confirmation message
+- The button label switches from **Save to DB** → **Update**
+- The connection's `db_id` is stored in the UI so future clicks update the same row
+- The banner auto-clears after 5 seconds
 
 #### Save to .env
 
-Writes `NAS_*` variables directly to your `.env` file and calls `config:clear` automatically.
+Choose from the chevron dropdown. On success:
 
-- Supports the **primary (first) connection only**
-- Requires the `.env` file to be writable by the web server
-- A page reload is needed after saving for changes to take effect
-- Use this option if you manage credentials outside the app (e.g. CI secrets, Docker env)
+- The result banner shows green with a "reload required" note
+- The page must be reloaded for the new values to take effect in the running app
 
----
+Both options leave the **password field blank** after saving — a "Saved password will be used" hint confirms the stored password will be sent on the next test or browser load.
 
 ### Multiple connections
 
-Click **+ Add Connection** at the bottom of the Connection tab to add a new blank card. Each card is independent — different hosts, protocols, and credentials. Remove a connection using the **Remove** link in its card footer (visible only when two or more connections exist).
+Click **+ Add Connection** at the bottom to add a new blank card. Each card is fully independent. Remove a connection with the **Remove** link in its footer (only shown when two or more connections exist).
 
 ---
 
@@ -241,8 +273,6 @@ Click **+ Add Connection** at the bottom of the Connection tab to add a new blan
 ```
 
 ### Schema nodes
-
-Each node passed to `$nodes`:
 
 ```php
 [
@@ -283,7 +313,7 @@ By default any authenticated user can browse, create, rename, and delete. Restri
 'edit_gate' => 'manage-nas',  // Gate::allows('manage-nas') must return true
 ```
 
-Set to `null` (default) to allow all authenticated users.
+Set to `null` (default) to allow all authenticated users. The save-connection endpoint also respects this gate.
 
 ---
 
@@ -309,19 +339,39 @@ NAS_FM_ROUTE_PREFIX=my-nas
 
 ---
 
-## Database Migration
+## Database
 
-The package auto-loads its migration via `loadMigrationsFrom`, so running `php artisan migrate` is all that's needed:
+### Migration
+
+The package auto-loads its migration, so `php artisan migrate` is all that's needed:
 
 ```bash
 php artisan migrate
 ```
 
-This creates the `nas_fm_connections` table. To publish the migration file into your project (e.g. to modify it):
+To publish the migration file into your project (e.g. to modify it):
 
 ```bash
 php artisan vendor:publish --tag=nas-file-manager-migrations
 ```
+
+### Table: `nas_fm_connections`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | bigint | Primary key |
+| `name` | string | Display name |
+| `enabled` | boolean | Whether the connection is active |
+| `protocol` | string | `sftp` / `ftp` / `ftps` / `smb` |
+| `host` | string | IP or hostname |
+| `port` | smallint | |
+| `username` | string | |
+| `password` | text | Encrypted via `encrypt()`, nullable |
+| `share` | string | SMB share name |
+| `smb_domain` | string | SMB domain / workgroup |
+| `subdirectory` | string | Starting path on the NAS |
+| `sort_order` | smallint | Display order |
+| `created_at` / `updated_at` | timestamp | |
 
 ---
 
