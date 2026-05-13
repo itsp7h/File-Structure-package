@@ -17,15 +17,29 @@
     nas-fm.create      POST
     nas-fm.rename      POST
     nas-fm.delete      POST
+    nas-fm.test        POST
 --}}
 
 @php
     $nodes   = $nodes   ?? config('nas-file-manager.schema', []);
     $canEdit = $canEdit ?? (config('nas-file-manager.edit_gate') === null || \Illuminate\Support\Facades\Gate::allows(config('nas-file-manager.edit_gate')));
     $title   = $title   ?? 'Folder Structure & File Manager';
+
+    $conn    = config('nas-file-manager.connection', []);
+    $hasConnection = !empty($conn['host']);
+    $connConfig = [
+        'protocol'     => $conn['protocol']   ?? 'sftp',
+        'host'         => $conn['host']        ?? '',
+        'port'         => (int) ($conn['port'] ?? 22),
+        'username'     => $conn['username']    ?? '',
+        'path'         => $conn['path']        ?? '/media',
+        'smb_share'    => $conn['smb_share']   ?? '',
+        'smb_domain'   => $conn['smb_domain']  ?? '',
+        'has_password' => !empty($conn['password']),
+    ];
 @endphp
 
-<div x-data="{ accordionOpen: false, ...nasFmComponent(@js($nodes)) }"
+<div x-data="{ accordionOpen: {{ $hasConnection ? 'false' : 'true' }}, ...nasFmComponent(@js($nodes), @js($connConfig)) }"
      class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
 
     {{-- Accordion header --}}
@@ -39,19 +53,35 @@
             </div>
             <div>
                 <p class="text-sm font-semibold text-slate-800">{{ $title }}</p>
-                <p class="text-xs text-slate-400 mt-0.5">View schema or browse and manage files live on your NAS</p>
+                <p class="text-xs text-slate-400 mt-0.5">
+                    @if($hasConnection)
+                        View schema or browse and manage files live on your NAS
+                    @else
+                        <span class="text-amber-500 font-medium">Connection not configured</span> — expand to set up your NAS connection
+                    @endif
+                </p>
             </div>
         </div>
-        <svg class="w-4 h-4 text-slate-400 transition-transform duration-200 flex-shrink-0"
-             :class="accordionOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-        </svg>
+        <div class="flex items-center gap-2 flex-shrink-0">
+            @if(!$hasConnection)
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">
+                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                </svg>
+                Setup required
+            </span>
+            @endif
+            <svg class="w-4 h-4 text-slate-400 transition-transform duration-200"
+                 :class="accordionOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+        </div>
     </button>
 
     <div x-show="accordionOpen"
          x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0"
          x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
-         class="border-t border-slate-100" style="display:none">
+         class="border-t border-slate-100" style="{{ $hasConnection ? 'display:none' : '' }}">
 
         {{-- Tab switcher --}}
         <div class="flex items-center gap-1 px-6 pt-5 pb-0">
@@ -71,10 +101,23 @@
                 </svg>
                 Live Browser
             </button>
+            <button type="button" @click="tab = 'connection'"
+                    :class="tab === 'connection'
+                        ? 'bg-sky-600 text-white'
+                        : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'"
+                    class="inline-flex items-center gap-1.5 text-xs font-medium px-3.5 py-2 rounded-xl transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+                </svg>
+                Connection
+                @if(!$hasConnection)
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></span>
+                @endif
+            </button>
         </div>
 
         {{-- ── SCHEMA TAB ── --}}
-        <div x-show="tab === 'schema'" class="px-6 py-5">
+        <div x-show="tab === 'schema'" class="px-6 py-5" style="display:none">
             <p class="text-xs text-slate-500 mb-4">
                 All paths are relative to your configured remote path.
                 Placeholders in <span class="text-brand-600 font-mono">{curly braces}</span> are filled in at runtime.
@@ -278,14 +321,172 @@
             @endif
 
         </div>{{-- /browser tab --}}
+
+        {{-- ── CONNECTION TAB ── --}}
+        <div x-show="tab === 'connection'" class="px-6 py-5 space-y-5" style="display:none">
+
+            {{-- No-config notice (shown only when NAS_HOST is blank) --}}
+            @if(!$hasConnection)
+            <div class="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                <svg class="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <div>
+                    <p class="text-xs font-semibold text-amber-800">NAS connection not configured</p>
+                    <p class="text-xs text-amber-700 mt-0.5 leading-relaxed">
+                        Fill in the fields below and click <strong>Test Connection</strong> to verify.
+                        Once working, add the values to your <code class="font-mono bg-amber-100 px-1 rounded">.env</code> file to persist them.
+                    </p>
+                </div>
+            </div>
+            @endif
+
+            {{-- Connection status result --}}
+            <div x-show="connStatus !== null" x-transition style="display:none"
+                 class="flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-medium border"
+                 :class="{
+                     'bg-emerald-50 border-emerald-200 text-emerald-800': connStatus === 'ok',
+                     'bg-red-50 border-red-200 text-red-800':             connStatus === 'fail',
+                     'bg-slate-50 border-slate-200 text-slate-600':       connStatus === 'testing',
+                 }">
+                <svg x-show="connStatus === 'testing'" class="w-4 h-4 animate-spin flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                <svg x-show="connStatus === 'ok'" class="w-4 h-4 text-emerald-500 flex-shrink-0" style="display:none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                </svg>
+                <svg x-show="connStatus === 'fail'" class="w-4 h-4 text-red-500 flex-shrink-0" style="display:none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+                <span x-text="connStatus === 'testing' ? 'Testing connection…' : connMessage"></span>
+            </div>
+
+            {{-- Protocol selector --}}
+            <div>
+                <label class="block text-xs font-medium text-slate-700 mb-2">Protocol</label>
+                <div class="flex gap-1.5 flex-wrap">
+                    <template x-for="proto in ['sftp', 'ftp', 'ftps', 'smb']" :key="proto">
+                        <button type="button" @click="connProtocol = proto; if(proto === 'sftp') connPort = (connPort === 21 || connPort === 445 ? 22 : connPort); if(proto === 'ftp' || proto === 'ftps') connPort = (connPort === 22 || connPort === 445 ? 21 : connPort); if(proto === 'smb') connPort = (connPort === 22 || connPort === 21 ? 445 : connPort);"
+                                :class="connProtocol === proto
+                                    ? 'bg-slate-800 text-white border-slate-800'
+                                    : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700'"
+                                class="px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors font-mono uppercase tracking-wide min-h-[32px]"
+                                x-text="proto"></button>
+                    </template>
+                </div>
+            </div>
+
+            {{-- Fields --}}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+                {{-- Host --}}
+                <div class="sm:col-span-2">
+                    <label class="block text-xs font-medium text-slate-700 mb-1.5">
+                        Host <span class="text-red-400">*</span>
+                    </label>
+                    <input type="text" x-model="connHost"
+                           placeholder="192.168.1.100 or nas.example.com"
+                           class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none bg-white min-h-[38px] transition-shadow"
+                           :class="connHost.trim() === '' && connStatus !== null ? 'border-red-300 bg-red-50' : ''">
+                    <p x-show="connHost.trim() === '' && connStatus !== null" class="text-[10px] text-red-500 mt-1">Host is required.</p>
+                </div>
+
+                {{-- Port --}}
+                <div>
+                    <label class="block text-xs font-medium text-slate-700 mb-1.5">Port</label>
+                    <input type="number" x-model.number="connPort" min="1" max="65535"
+                           class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none bg-white min-h-[38px] transition-shadow">
+                </div>
+
+                {{-- Username --}}
+                <div>
+                    <label class="block text-xs font-medium text-slate-700 mb-1.5">Username</label>
+                    <input type="text" x-model="connUsername" placeholder="admin"
+                           class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none bg-white min-h-[38px] transition-shadow">
+                </div>
+
+                {{-- Password --}}
+                <div class="sm:col-span-2" x-data="{ showPw: false }">
+                    <label class="block text-xs font-medium text-slate-700 mb-1.5">Password</label>
+                    <div class="relative">
+                        <input :type="showPw ? 'text' : 'password'"
+                               x-model="connPassword"
+                               :placeholder="connHasSavedPassword ? 'Leave blank to use saved password' : 'Enter password'"
+                               class="w-full border border-slate-200 rounded-xl px-3 py-2.5 pr-9 text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none bg-white min-h-[38px] transition-shadow">
+                        <button type="button" @click="showPw = !showPw" tabindex="-1"
+                                class="absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400 hover:text-slate-600 transition-colors">
+                            <svg x-show="!showPw" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                            </svg>
+                            <svg x-show="showPw" class="w-3.5 h-3.5" style="display:none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 4.411m0 0L21 21"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <p x-show="connHasSavedPassword && !connPassword" class="text-[10px] text-slate-400 mt-1" style="display:none">
+                        <svg class="w-3 h-3 inline-block mr-0.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:inline">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                        </svg>
+                        Saved password will be used
+                    </p>
+                </div>
+
+                {{-- Base path --}}
+                <div class="sm:col-span-2">
+                    <label class="block text-xs font-medium text-slate-700 mb-1.5">Base Path</label>
+                    <input type="text" x-model="connPath" placeholder="/media"
+                           class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none bg-white min-h-[38px] transition-shadow">
+                    <p class="text-[10px] text-slate-400 mt-1">Remote directory the file browser starts from.</p>
+                </div>
+
+                {{-- SMB Share (smb only) --}}
+                <div x-show="connProtocol === 'smb'" style="display:none">
+                    <label class="block text-xs font-medium text-slate-700 mb-1.5">SMB Share</label>
+                    <input type="text" x-model="connSmbShare" placeholder="media"
+                           class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none bg-white min-h-[38px] transition-shadow">
+                </div>
+
+                {{-- SMB Domain (smb only) --}}
+                <div x-show="connProtocol === 'smb'" style="display:none">
+                    <label class="block text-xs font-medium text-slate-700 mb-1.5">SMB Domain</label>
+                    <input type="text" x-model="connSmbDomain" placeholder="WORKGROUP"
+                           class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none bg-white min-h-[38px] transition-shadow">
+                </div>
+
+            </div>{{-- /fields grid --}}
+
+            {{-- Actions row --}}
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-slate-100">
+                {{-- Env hint --}}
+                <p class="text-xs text-slate-400 leading-relaxed">
+                    Persist settings in <code class="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-600 text-[10px]">.env</code>:
+                    <code class="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-600 text-[10px]">NAS_HOST</code>
+                    <code class="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-600 text-[10px]">NAS_USERNAME</code>
+                    <code class="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-600 text-[10px]">NAS_PASSWORD</code>
+                </p>
+                {{-- Test button --}}
+                <button type="button" @click="testConn()"
+                        :disabled="!connHost.trim() || connStatus === 'testing'"
+                        class="flex-shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50 min-h-[38px] transition-colors">
+                    <svg class="w-3.5 h-3.5" :class="connStatus === 'testing' ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path x-show="connStatus !== 'testing'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        <path x-show="connStatus === 'testing'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" style="display:none"/>
+                    </svg>
+                    <span x-text="connStatus === 'testing' ? 'Testing…' : 'Test Connection'"></span>
+                </button>
+            </div>
+
+        </div>{{-- /connection tab --}}
+
     </div>{{-- /accordion body --}}
 </div>
 
 <script>
-function nasFmComponent(nodes) {
+function nasFmComponent(nodes, connConfig) {
     return {
-        tab:           'schema',
-        nodes:         nodes || [],
+        tab: connConfig?.host ? 'schema' : 'connection',
+        nodes: nodes || [],
 
         // Live browser state
         items:         [],
@@ -305,6 +506,19 @@ function nasFmComponent(nodes) {
         deleteLoading: false,
         newFolderName: '',
         creating:      false,
+
+        // Connection form
+        connProtocol:         connConfig?.protocol     || 'sftp',
+        connHost:             connConfig?.host          || '',
+        connPort:             connConfig?.port          || 22,
+        connUsername:         connConfig?.username      || '',
+        connPassword:         '',
+        connPath:             connConfig?.path          || '/media',
+        connSmbShare:         connConfig?.smb_share     || '',
+        connSmbDomain:        connConfig?.smb_domain    || '',
+        connHasSavedPassword: connConfig?.has_password  || false,
+        connStatus:           null,
+        connMessage:          '',
 
         async load(path) {
             this.loading     = true;
@@ -387,6 +601,35 @@ function nasFmComponent(nodes) {
                 this.load(this.currentPath);
             } else {
                 this.notify(d.message, 'error');
+            }
+        },
+
+        async testConn() {
+            if (!this.connHost.trim()) return;
+            this.connStatus  = 'testing';
+            this.connMessage = '';
+            const body = {
+                protocol: this.connProtocol,
+                host:     this.connHost,
+                port:     this.connPort,
+                username: this.connUsername,
+                path:     this.connPath,
+            };
+            if (this.connPassword)  body.password   = this.connPassword;
+            if (this.connSmbShare)  body.smb_share   = this.connSmbShare;
+            if (this.connSmbDomain) body.smb_domain  = this.connSmbDomain;
+            try {
+                const r = await fetch('{{ route("nas-fm.test") }}', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': this.csrfToken() },
+                    body:    JSON.stringify(body),
+                });
+                const d = await r.json();
+                this.connStatus  = d.success ? 'ok' : 'fail';
+                this.connMessage = d.message || (d.success ? 'Connection successful.' : 'Connection failed.');
+            } catch (e) {
+                this.connStatus  = 'fail';
+                this.connMessage = 'Request error: ' + e.message;
             }
         },
 

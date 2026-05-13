@@ -108,6 +108,7 @@ class NasFileManagerController extends Controller
             'port'       => $request->input('port') ? (int) $request->input('port') : null,
             'username'   => $request->input('username'),
             'password'   => $request->input('password'),
+            'path'       => $request->input('path'),
             'smb_share'  => $request->input('smb_share'),
             'smb_domain' => $request->input('smb_domain'),
         ], fn($v) => $v !== null && $v !== '');
