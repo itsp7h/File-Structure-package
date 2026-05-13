@@ -4,8 +4,28 @@ namespace P7H\NasFileManager;
 
 class NasStorageService
 {
-    public function cfg(): array
+    public function cfg(int $index = 0): array
     {
+        // New multi-connection format
+        $connections = config('nas-file-manager.connections', []);
+
+        if (! empty($connections)) {
+            // Use the requested index, or fall back to first enabled connection
+            $c = $connections[$index] ?? collect($connections)->first(fn($c) => $c['enabled'] ?? true) ?? $connections[0];
+
+            return [
+                'protocol'   => $c['protocol']                              ?? 'sftp',
+                'host'       => $c['host']                                   ?? '',
+                'port'       => (int) ($c['port']                            ?? 22),
+                'username'   => $c['username']                               ?? '',
+                'password'   => $c['password']                               ?? '',
+                'path'       => rtrim($c['subdirectory'] ?? $c['path']       ?? '/media', '/'),
+                'smb_share'  => $c['share']              ?? $c['smb_share']  ?? '',
+                'smb_domain' => $c['smb_domain']                             ?? '',
+            ];
+        }
+
+        // Legacy single-connection fallback
         $c = config('nas-file-manager.connection', []);
 
         return [

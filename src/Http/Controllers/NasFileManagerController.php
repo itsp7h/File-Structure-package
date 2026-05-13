@@ -102,15 +102,22 @@ class NasFileManagerController extends Controller
      */
     private function override(Request $request): array
     {
-        return array_filter([
+        $overrides = array_filter([
             'protocol'   => $request->input('protocol'),
             'host'       => $request->input('host'),
             'port'       => $request->input('port') ? (int) $request->input('port') : null,
             'username'   => $request->input('username'),
             'password'   => $request->input('password'),
-            'path'       => $request->input('path'),
             'smb_share'  => $request->input('smb_share'),
             'smb_domain' => $request->input('smb_domain'),
         ], fn($v) => $v !== null && $v !== '');
+
+        // base_path overrides the configured subdirectory/path.
+        // Kept separate from 'path' (browse path) to avoid conflict.
+        if ($request->has('base_path')) {
+            $overrides['path'] = $request->input('base_path') ?? '';
+        }
+
+        return $overrides;
     }
 }
