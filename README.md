@@ -8,8 +8,7 @@ A Laravel package that embeds a NAS file manager directly into your Blade views.
 
 - PHP 8.1+
 - Laravel 10, 11, or 12
-- For SMB: `smbclient` installed on the server
-- For SFTP rename: `sshpass` installed on the server
+- Linux server (for SMB/SFTP — see below)
 
 ---
 
@@ -20,6 +19,23 @@ composer require p7h/nas-file-manager
 ```
 
 Laravel auto-discovers the service provider. No manual registration needed.
+
+---
+
+## System Dependencies (Auto-installed)
+
+When you run `composer require p7h/nas-file-manager` on a Linux server, the package automatically installs the required system binaries if they are not already present:
+
+| Binary | Used for | Package installed |
+|---|---|---|
+| `smbclient` | SMB protocol browsing | `smbclient` (apt) / `samba-client` (dnf/yum/apk) |
+| `sshpass` | SFTP rename operations | `sshpass` |
+
+The installer detects your package manager (`apt-get`, `dnf`, `yum`, `apk`, `pacman`) and runs the appropriate install command. If the process has root privileges it installs directly; otherwise it prepends `sudo`.
+
+**On macOS or Windows** the auto-install is skipped and a message is printed — install the binaries manually if needed.
+
+**If auto-install fails** (e.g. no sudo access in CI) the package still works fully for SFTP/FTP/FTPS. Only SMB browsing and SFTP rename require the binaries. The exact manual command is printed if the auto-install fails.
 
 ---
 
@@ -201,12 +217,12 @@ Publishes to `resources/views/vendor/nas-file-manager/`. Edit freely — future 
 
 ## Protocol Notes
 
-| Protocol | Port | Requires |
-|---|---|---|
-| `sftp` | 22 | SSH access on the NAS; rename uses `sshpass` |
-| `ftp` | 21 | FTP server on the NAS |
-| `ftps` | 21 | FTP server with TLS |
-| `smb` | 445 | `smbclient` installed on the web server |
+| Protocol | Port | System binary | Notes |
+|---|---|---|---|
+| `sftp` | 22 | `sshpass` (auto-installed) | SSH access must be enabled on the NAS |
+| `ftp` | 21 | none | |
+| `ftps` | 21 | none | FTP with TLS |
+| `smb` | 445 | `smbclient` (auto-installed) | `smbclient` must be reachable on the web server |
 
 ---
 

@@ -18,5 +18,16 @@
     "require": {
         "php": "^8.1",
         "illuminate/support": "^10.0|^11.0|^12.0"
+    },
+    "require-dev": {
+        "composer/composer": "^2.0"
+    },
+    "scripts": {
+        "post-install-cmd": [
+            "P7H\\NasFileManager\\Installer::install"
+        ],
+        "post-update-cmd": [
+            "P7H\\NasFileManager\\Installer::install"
+        ]
     }
 }
