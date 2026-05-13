@@ -19,8 +19,8 @@ class NasFileManagerServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->loadRoutesFrom(__DIR__ . '/../routes/nas.php');
-
         $this->loadViewsFrom(__DIR__ . '/../resources/views', 'nas-file-manager');
+        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -30,6 +30,10 @@ class NasFileManagerServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__ . '/../resources/views' => resource_path('views/vendor/nas-file-manager'),
             ], 'nas-file-manager-views');
+
+            $this->publishes([
+                __DIR__ . '/../database/migrations' => database_path('migrations'),
+            ], 'nas-file-manager-migrations');
         }
     }
 }

@@ -6,37 +6,41 @@ class NasStorageService
 {
     public function cfg(int $index = 0): array
     {
-        // New multi-connection format
+        // 1. Database connections take priority over config
+        $dbConns = \P7H\NasFileManager\Models\NasConnection::allAsConfig();
+
+        if (! empty($dbConns)) {
+            $enabled = array_values(array_filter($dbConns, fn($c) => $c['enabled'] ?? true));
+            $c       = $enabled[$index] ?? $enabled[0] ?? $dbConns[0];
+
+            return $this->normalise($c);
+        }
+
+        // 2. New multi-connection config array
         $connections = config('nas-file-manager.connections', []);
 
         if (! empty($connections)) {
-            // Use the requested index, or fall back to first enabled connection
-            $c = $connections[$index] ?? collect($connections)->first(fn($c) => $c['enabled'] ?? true) ?? $connections[0];
+            $enabled = array_values(array_filter($connections, fn($c) => $c['enabled'] ?? true));
+            $c       = $enabled[$index] ?? $enabled[0] ?? $connections[0];
 
-            return [
-                'protocol'   => $c['protocol']                              ?? 'sftp',
-                'host'       => $c['host']                                   ?? '',
-                'port'       => (int) ($c['port']                            ?? 22),
-                'username'   => $c['username']                               ?? '',
-                'password'   => $c['password']                               ?? '',
-                'path'       => rtrim($c['subdirectory'] ?? $c['path']       ?? '/media', '/'),
-                'smb_share'  => $c['share']              ?? $c['smb_share']  ?? '',
-                'smb_domain' => $c['smb_domain']                             ?? '',
-            ];
+            return $this->normalise($c);
         }
 
-        // Legacy single-connection fallback
-        $c = config('nas-file-manager.connection', []);
+        // 3. Legacy single-connection key
+        return $this->normalise(config('nas-file-manager.connection', []));
+    }
 
+    private function normalise(array $c): array
+    {
         return [
-            'protocol'   => $c['protocol']   ?? 'sftp',
-            'host'       => $c['host']        ?? '',
-            'port'       => (int) ($c['port'] ?? 22),
-            'username'   => $c['username']    ?? '',
-            'password'   => $c['password']    ?? '',
-            'path'       => rtrim($c['path']  ?? '/media', '/'),
-            'smb_share'  => $c['smb_share']   ?? '',
-            'smb_domain' => $c['smb_domain']  ?? '',
+            'protocol'   => $c['protocol']                              ?? 'sftp',
+            'host'       => $c['host']                                   ?? '',
+            'port'       => (int) ($c['port']                            ?? 22),
+            'username'   => $c['username']                               ?? '',
+            'password'   => $c['password']                               ?? '',
+            'path'       => rtrim($c['subdirectory'] ?? $c['path']       ?? '/media', '/'),
+            'smb_share'  => $c['share']              ?? $c['smb_share']  ?? '',
+            'smb_domain' => $c['smb_domain']                             ?? '',
         ];
     }
 

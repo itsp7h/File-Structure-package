@@ -14,8 +14,10 @@
     $canEdit = $canEdit ?? (config('nas-file-manager.edit_gate') === null || \Illuminate\Support\Facades\Gate::allows(config('nas-file-manager.edit_gate')));
     $title   = $title   ?? 'Folder Structure & File Manager';
 
-    // Build connections array for JS, supporting both new `connections` and legacy `connection`
-    $rawConns = config('nas-file-manager.connections', []);
+    // Build connections — DB rows take priority, then config, then legacy key
+    $rawConns = \P7H\NasFileManager\Models\NasConnection::allAsConfig()
+        ?? config('nas-file-manager.connections', []);
+
     if (empty($rawConns)) {
         $lc = config('nas-file-manager.connection', []);
         $rawConns = [[
@@ -33,7 +35,8 @@
     }
 
     $connectionsJs = collect($rawConns)->values()->map(fn($c, $i) => [
-        '_id'            => $i + 1,
+        '_id'            => $c['db_id'] ?? ($i + 1),
+        'db_id'          => $c['db_id'] ?? null,
         'name'           => $c['name']                             ?? ('Connection ' . ($i + 1)),
         'enabled'        => (bool)($c['enabled']                   ?? true),
         'expanded'       => $i === 0,
@@ -48,6 +51,8 @@
         'subdirectory'   => $c['subdirectory'] ?? ($c['path']       ?? '/media'),
         'testStatus'     => null,
         'testMessage'    => '',
+        'saveStatus'     => null,
+        'saveMessage'    => '',
         'pickerOpen'     => false,
         'pickerItems'    => [],
         'pickerPath'     => '',
@@ -576,8 +581,30 @@
                             <span x-text="conn.testStatus === 'testing' ? 'Testing connection…' : conn.testMessage"></span>
                         </div>
 
+                        {{-- Save result --}}
+                        <div x-show="conn.saveStatus !== null" x-transition style="display:none"
+                             class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs border"
+                             :class="{
+                                 'bg-emerald-50 border-emerald-200 text-emerald-800': conn.saveStatus === 'saved',
+                                 'bg-red-50 border-red-200 text-red-800':             conn.saveStatus === 'error',
+                                 'bg-slate-50 border-slate-200 text-slate-600':       conn.saveStatus === 'saving',
+                             }">
+                            <svg x-show="conn.saveStatus === 'saving'" class="w-3.5 h-3.5 animate-spin flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:none">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                            <svg x-show="conn.saveStatus === 'saved'" class="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" style="display:none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            <svg x-show="conn.saveStatus === 'error'" class="w-3.5 h-3.5 text-red-500 flex-shrink-0" style="display:none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                            <span x-text="conn.saveStatus === 'saving' ? 'Saving…' : conn.saveMessage"></span>
+                        </div>
+
                         {{-- Card actions --}}
-                        <div class="flex items-center justify-between gap-3 pt-1 border-t border-slate-100">
+                        <div class="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+
+                            {{-- Left: Remove --}}
                             <button type="button" x-show="connections.length > 1" @click="removeConnection(conn._id)"
                                     class="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-red-600 transition-colors" style="display:none">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -585,25 +612,100 @@
                                 </svg>
                                 Remove
                             </button>
-                            <div x-show="connections.length <= 1"></div>{{-- spacer --}}
-                            <div class="flex items-center gap-2">
-                                <p class="text-[10px] text-slate-400 hidden sm:block">
-                                    Persist in <code class="font-mono bg-slate-100 px-0.5 rounded">.env</code>:
-                                    <code class="font-mono bg-slate-100 px-0.5 rounded">NAS_HOST</code>
-                                    <code class="font-mono bg-slate-100 px-0.5 rounded">NAS_USERNAME</code>
-                                    <code class="font-mono bg-slate-100 px-0.5 rounded">NAS_PASSWORD</code>
-                                </p>
+                            <div x-show="connections.length <= 1" class="flex-shrink-0"></div>
+
+                            {{-- Right: Test + Save --}}
+                            <div class="flex items-center gap-2 flex-shrink-0">
+
+                                {{-- Test --}}
                                 <button type="button" @click="testConn(conn)"
                                         :disabled="!conn.host.trim() || conn.testStatus === 'testing'"
-                                        class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50 min-h-[36px] transition-colors">
+                                        class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50 min-h-[36px] transition-colors">
                                     <svg class="w-3.5 h-3.5" :class="conn.testStatus === 'testing' ? 'animate-spin' : ''"
                                          fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
                                     </svg>
-                                    <span x-text="conn.testStatus === 'testing' ? 'Testing…' : 'Test Connection'"></span>
+                                    <span x-text="conn.testStatus === 'testing' ? 'Testing…' : 'Test'"></span>
                                 </button>
-                            </div>
-                        </div>
+
+                                {{-- Save split button --}}
+                                <div class="relative" x-data="{ saveOpen: false }" @keydown.escape.window="saveOpen = false">
+                                    <div class="flex items-stretch rounded-xl overflow-hidden border border-emerald-600">
+                                        {{-- Primary: Save to Database --}}
+                                        <button type="button"
+                                                @click="saveConn(conn, 'database')"
+                                                :disabled="!conn.host.trim() || conn.saveStatus === 'saving'"
+                                                class="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 min-h-[36px] transition-colors border-r border-emerald-500">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+                                            </svg>
+                                            <span x-text="conn.db_id ? 'Update' : 'Save to DB'"></span>
+                                        </button>
+                                        {{-- Chevron: open dropdown --}}
+                                        <button type="button" @click.stop="saveOpen = !saveOpen"
+                                                class="px-2 bg-emerald-600 hover:bg-emerald-700 text-white transition-colors">
+                                            <svg class="w-3 h-3 transition-transform duration-150" :class="saveOpen ? 'rotate-180' : ''"
+                                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+
+                                    {{-- Dropdown --}}
+                                    <div x-show="saveOpen" @click.outside="saveOpen = false"
+                                         x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
+                                         x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                                         class="absolute right-0 bottom-full mb-1.5 w-60 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden z-20" style="display:none">
+
+                                        <div class="px-3 pt-3 pb-1">
+                                            <p class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Save credentials to</p>
+                                        </div>
+
+                                        {{-- Database option --}}
+                                        <button type="button"
+                                                @click="saveConn(conn, 'database'); saveOpen = false"
+                                                :disabled="!conn.host.trim() || conn.saveStatus === 'saving'"
+                                                class="w-full flex items-start gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left disabled:opacity-50">
+                                            <div class="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                                <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <p class="text-xs font-semibold text-slate-800" x-text="conn.db_id ? 'Update in Database' : 'Save to Database'"></p>
+                                                <p class="text-[10px] text-slate-500 mt-0.5 leading-relaxed">Persists across all environments. Supports multiple connections. Password stored encrypted.</p>
+                                            </div>
+                                        </button>
+
+                                        <div class="mx-3 border-t border-slate-100"></div>
+
+                                        {{-- .env option --}}
+                                        <button type="button"
+                                                @click="saveConn(conn, 'env'); saveOpen = false"
+                                                :disabled="!conn.host.trim() || conn.saveStatus === 'saving'"
+                                                class="w-full flex items-start gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left disabled:opacity-50">
+                                            <div class="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                                <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <p class="text-xs font-semibold text-slate-800">Save to .env</p>
+                                                <p class="text-[10px] text-slate-500 mt-0.5 leading-relaxed">Writes <code class="font-mono bg-slate-100 px-0.5 rounded">NAS_*</code> vars to your .env file. Primary connection only. Page reload required.</p>
+                                            </div>
+                                        </button>
+
+                                        <div class="px-3 pb-3 pt-1">
+                                            <p class="text-[10px] text-slate-400 leading-relaxed">
+                                                Database is recommended. Use .env only if you manage credentials outside the app.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                </div>{{-- /save split button --}}
+
+                            </div>{{-- /right actions --}}
+                        </div>{{-- /card actions --}}
 
                     </div>{{-- /card body --}}
                 </div>{{-- /card --}}
@@ -653,6 +755,7 @@ function nasFmComponent(nodes, connections) {
         addConnection() {
             this.connections.push({
                 _id:            this.nextId++,
+                db_id:          null,
                 name:           'New Connection',
                 enabled:        true,
                 expanded:       true,
@@ -667,6 +770,8 @@ function nasFmComponent(nodes, connections) {
                 subdirectory:   '/media',
                 testStatus:     null,
                 testMessage:    '',
+                saveStatus:     null,
+                saveMessage:    '',
                 pickerOpen:     false,
                 pickerItems:    [],
                 pickerPath:     '',
@@ -706,6 +811,45 @@ function nasFmComponent(nodes, connections) {
             } catch (e) {
                 conn.testStatus  = 'fail';
                 conn.testMessage = 'Request error: ' + e.message;
+            }
+        },
+
+        async saveConn(conn, target) {
+            if (!conn.host.trim()) return;
+            conn.saveStatus  = 'saving';
+            conn.saveMessage = '';
+            const body = {
+                save_to:      target,
+                db_id:        conn.db_id,
+                name:         conn.name,
+                enabled:      conn.enabled,
+                protocol:     conn.protocol,
+                host:         conn.host,
+                port:         conn.port,
+                username:     conn.username,
+                subdirectory: conn.subdirectory,
+                share:        conn.share,
+                smb_domain:   conn.smb_domain,
+            };
+            if (conn.password) body.password = conn.password;
+            try {
+                const r = await fetch('{{ route("nas-fm.connections.save") }}', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': this.csrfToken() },
+                    body:    JSON.stringify(body),
+                });
+                const d = await r.json();
+                conn.saveStatus  = d.success ? 'saved' : 'error';
+                conn.saveMessage = d.message || (d.success ? 'Saved.' : 'Save failed.');
+                if (d.success && d.id) {
+                    conn.db_id       = d.id;
+                    conn.has_password = conn.has_password || !!conn.password;
+                }
+                // Auto-clear success message after 5 s
+                if (d.success) setTimeout(() => { conn.saveStatus = null; conn.saveMessage = ''; }, 5000);
+            } catch (e) {
+                conn.saveStatus  = 'error';
+                conn.saveMessage = 'Request error: ' + e.message;
             }
         },
 

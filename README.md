@@ -200,6 +200,30 @@ Clicking **Test Connection** on a card sends the form values to `POST /nas-file-
 - **Red ✗** — failed, with a plain-English error (wrong password, unreachable host, access denied, etc.)
 - Leaving the password blank falls back to the password stored in `.env` / config
 
+### Saving credentials
+
+Each connection card has a **Save** split button with two options:
+
+#### Save to Database *(recommended)*
+
+Stores the connection in the `nas_fm_connections` table (created automatically by the package migration). The package reads from this table on every page load, so connections survive deployments and `.env` resets. Passwords are stored **encrypted** using Laravel's `encrypt()`.
+
+- Works for **all connections**, including multiple ones
+- No `.env` changes required
+- The button label changes to **Update** once a connection has been saved
+- Run `php artisan migrate` once after installing the package to create the table
+
+#### Save to .env
+
+Writes `NAS_*` variables directly to your `.env` file and calls `config:clear` automatically.
+
+- Supports the **primary (first) connection only**
+- Requires the `.env` file to be writable by the web server
+- A page reload is needed after saving for changes to take effect
+- Use this option if you manage credentials outside the app (e.g. CI secrets, Docker env)
+
+---
+
 ### Multiple connections
 
 Click **+ Add Connection** at the bottom of the Connection tab to add a new blank card. Each card is independent — different hosts, protocols, and credentials. Remove a connection using the **Remove** link in its card footer (visible only when two or more connections exist).
@@ -275,11 +299,28 @@ All routes are registered under `web` + `auth` middleware.
 | `POST` | `/nas-file-manager/create` | Create a folder |
 | `POST` | `/nas-file-manager/rename` | Rename a file or folder |
 | `POST` | `/nas-file-manager/delete` | Delete a file or folder |
+| `POST` | `/nas-file-manager/connections/save` | Save a connection to database or `.env` |
 
 Change the URL prefix:
 
 ```env
 NAS_FM_ROUTE_PREFIX=my-nas
+```
+
+---
+
+## Database Migration
+
+The package auto-loads its migration via `loadMigrationsFrom`, so running `php artisan migrate` is all that's needed:
+
+```bash
+php artisan migrate
+```
+
+This creates the `nas_fm_connections` table. To publish the migration file into your project (e.g. to modify it):
+
+```bash
+php artisan vendor:publish --tag=nas-file-manager-migrations
 ```
 
 ---
