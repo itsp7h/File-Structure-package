@@ -1,6 +1,6 @@
 # p7h/nas-file-manager
 
-A Laravel package that embeds a NAS file manager directly into your Blade views. Supports SFTP, FTP, FTPS, and SMB protocols. Includes a built-in Connection tab for first-time setup with no configuration required to get started.
+A Laravel package that embeds a NAS file manager directly into your Blade views. Supports SFTP, FTP, FTPS, and SMB protocols. Includes a built-in Connection tab for first-time setup — no configuration required to get started.
 
 ---
 
@@ -8,7 +8,7 @@ A Laravel package that embeds a NAS file manager directly into your Blade views.
 
 - PHP 8.1+
 - Laravel 10, 11, or 12
-- Linux server (for SMB/SFTP — see below)
+- Linux server (for SMB/SFTP — see System Dependencies below)
 
 ---
 
@@ -24,7 +24,7 @@ Laravel auto-discovers the service provider. No manual registration needed.
 
 ## System Dependencies (Auto-installed)
 
-When you run `composer require p7h/nas-file-manager` on a Linux server, the package automatically installs the required system binaries if they are not already present:
+When you run `composer require` on a Linux server, the package automatically installs the required system binaries if they are not already present:
 
 | Binary | Used for | Package installed |
 |---|---|---|
@@ -35,7 +35,7 @@ The installer detects your package manager (`apt-get`, `dnf`, `yum`, `apk`, `pac
 
 **On macOS or Windows** the auto-install is skipped and a message is printed — install the binaries manually if needed.
 
-**If auto-install fails** (e.g. no sudo access in CI) the package still works fully for SFTP/FTP/FTPS. Only SMB browsing and SFTP rename require the binaries. The exact manual command is printed if the auto-install fails.
+**If auto-install fails** (e.g. no sudo in CI) the package still works fully for SFTP/FTP/FTPS. Only SMB browsing and SFTP rename require the binaries. The exact manual command is printed if the install fails.
 
 ---
 
@@ -47,7 +47,7 @@ Include the component anywhere inside an authenticated Blade view:
 @include('nas-file-manager::file-manager')
 ```
 
-That's it. If `NAS_HOST` is not set in your `.env`, the component opens automatically to the **Connection tab** where you can enter and test your credentials before saving them.
+If `NAS_HOST` is not set, the component opens automatically to the **Connection tab** so you can enter and test credentials before saving them to `.env`.
 
 ---
 
@@ -59,28 +59,77 @@ That's it. If `NAS_HOST` is not set in your `.env`, the component opens automati
 php artisan vendor:publish --tag=nas-file-manager-config
 ```
 
-This copies `config/nas-file-manager.php` into your project so you can customise it.
+Copies `config/nas-file-manager.php` into your project for customisation, including adding multiple connections.
 
 ### 2. Add to `.env`
 
 ```env
+NAS_ENABLED=true           # enable or disable the primary connection (default: true)
 NAS_PROTOCOL=sftp          # sftp | ftp | ftps | smb  (default: sftp)
 NAS_HOST=192.168.1.100     # IP address or hostname
 NAS_PORT=22                # 22=sftp, 21=ftp/ftps, 445=smb
 NAS_USERNAME=admin
 NAS_PASSWORD=secret
-NAS_PATH=/media            # Base remote directory (default: /media)
+NAS_PATH=/media            # starting subdirectory on the NAS (default: /media)
 
 # SMB only
-NAS_SMB_SHARE=media
-NAS_SMB_DOMAIN=WORKGROUP
+NAS_SMB_SHARE=media        # share name (required for smb)
+NAS_SMB_DOMAIN=WORKGROUP   # domain or workgroup
 ```
+
+### 3. Multiple connections (published config only)
+
+After publishing the config, add extra entries to the `connections` array:
+
+```php
+// config/nas-file-manager.php
+'connections' => [
+    [
+        'name'         => 'Primary NAS',
+        'enabled'      => true,
+        'protocol'     => 'sftp',
+        'host'         => '192.168.1.100',
+        'port'         => 22,
+        'username'     => 'admin',
+        'password'     => env('NAS_PASSWORD'),
+        'subdirectory' => '/media',
+    ],
+    [
+        'name'         => 'Backup NAS',
+        'enabled'      => true,
+        'protocol'     => 'smb',
+        'host'         => '192.168.1.200',
+        'port'         => 445,
+        'username'     => 'backup',
+        'password'     => env('NAS_BACKUP_PASSWORD'),
+        'share'        => 'backups',
+        'smb_domain'   => 'WORKGROUP',
+        'subdirectory' => '/archives',
+    ],
+],
+```
+
+The first **enabled** connection is used by the Live Browser tab.
+
+---
+
+## The Three Tabs
+
+### Schema
+
+Displays a static folder tree defined in config or passed as `$nodes`. Useful for documenting your expected NAS structure without making a live connection. No credentials needed.
+
+### Live Browser
+
+Connects to the first enabled NAS connection and lets you navigate folders, create new folders, rename, and delete — subject to the `edit_gate` setting.
+
+### Connection
+
+Manage all your NAS connections from the UI. Supports multiple connections, live testing, an enable/disable toggle per connection, and a visual subdirectory picker.
 
 ---
 
 ## Connection Tab
-
-The component includes a **Connection** tab alongside Schema and Live Browser. It is designed to guide first-time setup without requiring any documentation.
 
 ### First install — no `.env` set
 
@@ -89,57 +138,87 @@ When `NAS_HOST` is empty the component:
 - **Auto-expands** the accordion on page load
 - **Pre-selects** the Connection tab
 - Shows an amber **"Setup required"** badge in the header
-- Displays a setup notice explaining what to do
+- Displays a setup notice with instructions
 
-Fill in your credentials, click **Test Connection**, and copy the working values into your `.env`.
+Fill in your credentials, click **Test Connection**, confirm it works, then copy the values into your `.env`.
 
 ### After `.env` is configured
 
-- The accordion is collapsed by default (unobtrusive)
-- The header shows the normal subtitle with no warning badge
-- The component opens to the **Schema** tab by default
-- The Connection tab remains available for debugging or credential changes at any time
+- The accordion is **collapsed by default** — unobtrusive
+- The component opens to the **Schema** tab
+- The Connection tab is still accessible at any time for debugging or changes
+
+### Connection cards
+
+Each NAS connection is shown as a collapsible card. The collapsed header shows:
+
+- Connection name (editable inline)
+- Protocol badge
+- Host address
+- Test status dot (green = ok, red = failed, amber = testing)
+- Enable / disable toggle
+
+Expanding a card reveals the full form.
+
+### Enable / disable toggle
+
+Each connection has an iOS-style toggle in the card header. Flip it without expanding the card.
+
+- **Green (on)** — connection is active; the Live Browser uses the first enabled connection
+- **Grey (off)** — connection is inactive and ignored by the Live Browser
 
 ### Connection form fields
 
 | Field | Notes |
 |---|---|
-| Protocol | `sftp` / `ftp` / `ftps` / `smb` — selecting one auto-suggests the default port |
-| Host | IP address or hostname (required to test) |
-| Port | Auto-filled when you switch protocol; editable |
+| Protocol | `sftp` / `ftp` / `ftps` / `smb` — switching auto-suggests the default port (22 / 21 / 445) |
+| Host | IP address or hostname — required to test |
+| Port | Auto-filled on protocol change; editable |
 | Username | |
-| Password | Leave blank to use the saved `.env` password; shows a hint when a saved password exists |
-| Base Path | Remote directory the Live Browser starts from |
-| SMB Share | Shown only when protocol is `smb` |
-| SMB Domain | Shown only when protocol is `smb` |
+| Password | Leave blank to use the saved `.env` password; a hint appears when a saved password exists |
+| Share | SMB only — the share name on the server (required for SMB) |
+| Domain | SMB only — workgroup or Windows domain |
+| Subdirectory | Starting directory on the NAS for the Live Browser |
+
+### Subdirectory browser
+
+The **Subdirectory** field has a **Browse** button. Clicking it opens an inline file picker directly below the field:
+
+- Connects to the NAS using the credentials currently entered in the card (before saving)
+- Browses from the **NAS root** — not the current subdirectory — so you can pick any path
+- Shows only folders (files are hidden)
+- Has breadcrumb navigation to go deeper into the tree
+- Hovering a folder reveals a green **Select** button; clicking it sets the subdirectory instantly
+- The **Select /current/path** button in the toolbar selects the currently browsed level
+- Click **Browse** again (now labelled **Close**) to dismiss the picker without changing anything
 
 ### Test Connection
 
-Clicking **Test Connection** sends the form values to `POST /nas-file-manager/test` as credential overrides. The result appears inline:
+Clicking **Test Connection** on a card sends the form values to `POST /nas-file-manager/test` as live credential overrides. The result appears inline below the form:
 
-- **Green ✓** — connection successful, message from the server
-- **Red ✗** — connection failed, error message explaining why (wrong password, unreachable host, access denied, etc.)
-- Leaving the password blank falls back to the password stored in config/`.env`
+- **Green ✓** — connected successfully
+- **Red ✗** — failed, with a plain-English error (wrong password, unreachable host, access denied, etc.)
+- Leaving the password blank falls back to the password stored in `.env` / config
+
+### Multiple connections
+
+Click **+ Add Connection** at the bottom of the Connection tab to add a new blank card. Each card is independent — different hosts, protocols, and credentials. Remove a connection using the **Remove** link in its card footer (visible only when two or more connections exist).
 
 ---
 
 ## Component Options
 
-Pass any of these when including the component:
-
 ```blade
 @include('nas-file-manager::file-manager', [
-    'nodes'   => $treeNodes,                    // static schema nodes (see below)
-    'canEdit' => true,                          // show create / rename / delete actions
-    'title'   => 'Folder Structure & Files',   // accordion header title
+    'nodes'   => $treeNodes,                   // static schema nodes (see below)
+    'canEdit' => true,                         // show create / rename / delete actions
+    'title'   => 'Folder Structure & Files',  // accordion header title
 ])
 ```
 
 ### Schema nodes
 
-The **Schema tab** displays a static folder tree — useful for documenting your expected NAS structure without making a live connection.
-
-Each node:
+Each node passed to `$nodes`:
 
 ```php
 [
@@ -148,12 +227,12 @@ Each node:
     'label'       => 'Media',
     'path'        => 'Media',
     'parent_path' => null,
-    'is_template' => false,  // true = shown in brand colour as a placeholder
+    'is_template' => false,  // true = italic brand-colour placeholder
     'can_edit'    => false,
 ]
 ```
 
-You can define nodes statically in `config/nas-file-manager.php`:
+Define statically in config:
 
 ```php
 'schema' => [
@@ -163,7 +242,7 @@ You can define nodes statically in `config/nas-file-manager.php`:
 ],
 ```
 
-Or pass them dynamically from your controller:
+Or pass dynamically:
 
 ```blade
 @include('nas-file-manager::file-manager', ['nodes' => $nodes])
@@ -173,11 +252,11 @@ Or pass them dynamically from your controller:
 
 ## Authorization
 
-By default any authenticated user can use the file manager. Create/rename/delete actions are shown to all authenticated users unless you set `edit_gate`.
+By default any authenticated user can browse, create, rename, and delete. Restrict write actions with a gate:
 
 ```php
 // config/nas-file-manager.php
-'edit_gate' => 'manage-files',  // Gate::allows('manage-files') must return true
+'edit_gate' => 'manage-nas',  // Gate::allows('manage-nas') must return true
 ```
 
 Set to `null` (default) to allow all authenticated users.
@@ -186,21 +265,21 @@ Set to `null` (default) to allow all authenticated users.
 
 ## Routes
 
-All routes are registered under the `web` + `auth` middleware stack.
+All routes are registered under `web` + `auth` middleware.
 
 | Method | URI | Action |
 |---|---|---|
-| `POST` | `/nas-file-manager/test` | Test a connection (supports credential overrides) |
+| `POST` | `/nas-file-manager/test` | Test a connection (supports live credential overrides) |
 | `POST` | `/nas-file-manager/shares` | List available SMB shares |
 | `POST` | `/nas-file-manager/list-items` | List directory contents |
 | `POST` | `/nas-file-manager/create` | Create a folder |
 | `POST` | `/nas-file-manager/rename` | Rename a file or folder |
 | `POST` | `/nas-file-manager/delete` | Delete a file or folder |
 
-Change the prefix via `.env`:
+Change the URL prefix:
 
 ```env
-NAS_FM_ROUTE_PREFIX=my-files
+NAS_FM_ROUTE_PREFIX=my-nas
 ```
 
 ---
@@ -211,18 +290,18 @@ NAS_FM_ROUTE_PREFIX=my-files
 php artisan vendor:publish --tag=nas-file-manager-views
 ```
 
-Publishes to `resources/views/vendor/nas-file-manager/`. Edit freely — future package updates will not overwrite published views.
+Publishes to `resources/views/vendor/nas-file-manager/`. Future package updates will not overwrite published views.
 
 ---
 
 ## Protocol Notes
 
-| Protocol | Port | System binary | Notes |
+| Protocol | Default port | System binary | Notes |
 |---|---|---|---|
-| `sftp` | 22 | `sshpass` (auto-installed) | SSH access must be enabled on the NAS |
+| `sftp` | 22 | `sshpass` (auto-installed) | SSH must be enabled on the NAS |
 | `ftp` | 21 | none | |
-| `ftps` | 21 | none | FTP with TLS |
-| `smb` | 445 | `smbclient` (auto-installed) | `smbclient` must be reachable on the web server |
+| `ftps` | 21 | none | FTP over TLS |
+| `smb` | 445 | `smbclient` (auto-installed) | Share name required |
 
 ---
 
