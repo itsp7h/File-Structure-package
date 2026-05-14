@@ -59,6 +59,8 @@
         'pickerSegments' => [],
         'pickerLoading'  => false,
         'pickerError'    => '',
+        'shares'         => [],
+        'sharesLoading'  => false,
     ])->all();
 
     $hasConnection = collect($rawConns)->contains(fn($c) => !empty($c['host']));
@@ -374,7 +376,7 @@
                                     :class="conn.enabled ? 'bg-emerald-500' : 'bg-slate-300'"
                                     class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0"
                                     :title="conn.enabled ? 'Disable connection' : 'Enable connection'">
-                                <span :class="conn.enabled ? 'translate-x-4.5' : 'translate-x-0.5'"
+                                <span :class="conn.enabled ? 'translate-x-[18px]' : 'translate-x-[2px]'"
                                       class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"></span>
                             </button>
                         </div>
@@ -410,6 +412,7 @@
                             <div class="sm:col-span-2">
                                 <label class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Host <span class="text-red-400 normal-case font-normal">*</span></label>
                                 <input type="text" x-model="conn.host" placeholder="192.168.1.100 or nas.example.com"
+                                       @input="if (!conn.host.trim()) resetConn(conn)"
                                        class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none bg-white min-h-[38px]">
                             </div>
 
@@ -453,7 +456,34 @@
                             {{-- SMB: Share + Domain --}}
                             <div x-show="conn.protocol === 'smb'" style="display:none">
                                 <label class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Share <span class="text-red-400 normal-case font-normal">*</span></label>
-                                <input type="text" x-model="conn.share" placeholder="media"
+
+                                {{-- Loading state --}}
+                                <div x-show="conn.sharesLoading" class="flex items-center gap-2 w-full border border-slate-200 rounded-xl px-3 py-2.5 bg-white min-h-[38px]" style="display:none">
+                                    <svg class="w-3.5 h-3.5 animate-spin text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                                    </svg>
+                                    <span class="text-xs text-slate-400">Discovering shares…</span>
+                                </div>
+
+                                {{-- Dropdown once shares are loaded --}}
+                                <div x-show="!conn.sharesLoading && conn.shares.length > 0" class="relative" style="display:none">
+                                    <select x-model="conn.share"
+                                            class="w-full appearance-none border border-slate-200 rounded-xl px-3 py-2.5 pr-8 text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none bg-white min-h-[38px] cursor-pointer">
+                                        <option value="">— select a share —</option>
+                                        <template x-for="s in conn.shares" :key="s">
+                                            <option :value="s" x-text="s"></option>
+                                        </template>
+                                    </select>
+                                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </div>
+                                </div>
+
+                                {{-- Plain text input when no shares discovered yet --}}
+                                <input x-show="!conn.sharesLoading && conn.shares.length === 0"
+                                       type="text" x-model="conn.share" placeholder="media"
                                        class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none bg-white min-h-[38px]">
                             </div>
 
@@ -735,6 +765,23 @@ function nasFmComponent(nodes, connections) {
         connections: connections || [],
         nextId:      (connections || []).length + 1,
 
+        init() {
+            this.connections.forEach(conn => {
+                if (conn.protocol === 'smb' && conn.host.trim()) {
+                    const body = {
+                        protocol:  conn.protocol,
+                        host:      conn.host,
+                        port:      conn.port,
+                        username:  conn.username,
+                        base_path: conn.subdirectory || '/',
+                    };
+                    if (conn.password)   body.password   = conn.password;
+                    if (conn.smb_domain) body.smb_domain = conn.smb_domain;
+                    this.fetchShares(conn, body);
+                }
+            });
+        },
+
         // Live browser
         items:         [],
         currentPath:   '',
@@ -778,6 +825,8 @@ function nasFmComponent(nodes, connections) {
                 pickerSegments: [],
                 pickerLoading:  false,
                 pickerError:    '',
+                shares:         [],
+                sharesLoading:  false,
             });
         },
 
@@ -785,10 +834,31 @@ function nasFmComponent(nodes, connections) {
             this.connections = this.connections.filter(c => c._id !== id);
         },
 
+        resetConn(conn) {
+            conn.port         = conn.protocol === 'smb' ? 445 : (conn.protocol === 'sftp' ? 22 : 21);
+            conn.username     = '';
+            conn.password     = '';
+            conn.has_password = false;
+            conn.share        = '';
+            conn.smb_domain   = '';
+            conn.subdirectory = '';
+            conn.testStatus   = null;
+            conn.testMessage  = '';
+            conn.saveStatus   = null;
+            conn.saveMessage  = '';
+            conn.shares       = [];
+            conn.sharesLoading = false;
+            conn.pickerOpen   = false;
+            conn.pickerItems  = [];
+            conn.pickerPath   = '';
+            conn.pickerSegments = [];
+        },
+
         async testConn(conn) {
             if (!conn.host.trim()) return;
             conn.testStatus  = 'testing';
             conn.testMessage = '';
+            conn.shares      = [];
             const body = {
                 protocol:  conn.protocol,
                 host:      conn.host,
@@ -799,6 +869,21 @@ function nasFmComponent(nodes, connections) {
             if (conn.password)   body.password   = conn.password;
             if (conn.share)      body.smb_share   = conn.share;
             if (conn.smb_domain) body.smb_domain  = conn.smb_domain;
+
+            // For SMB without a share set, skip the test and discover shares directly
+            if (conn.protocol === 'smb' && !conn.share.trim()) {
+                conn.testStatus  = 'testing';
+                conn.testMessage = 'Discovering available shares…';
+                await this.fetchShares(conn, body);
+                conn.testStatus  = conn.shares.length > 0
+                    ? 'ok'
+                    : 'fail';
+                conn.testMessage = conn.shares.length > 0
+                    ? `Found ${conn.shares.length} share${conn.shares.length === 1 ? '' : 's'} — select one below.`
+                    : 'No shares found. Check your credentials and try again.';
+                return;
+            }
+
             try {
                 const r = await fetch('{{ route("nas-fm.test") }}', {
                     method:  'POST',
@@ -808,9 +893,30 @@ function nasFmComponent(nodes, connections) {
                 const d = await r.json();
                 conn.testStatus  = d.success ? 'ok' : 'fail';
                 conn.testMessage = d.message || (d.success ? 'Connection successful.' : 'Connection failed.');
+
+                if (d.success && conn.protocol === 'smb') {
+                    this.fetchShares(conn, body);
+                }
             } catch (e) {
                 conn.testStatus  = 'fail';
                 conn.testMessage = 'Request error: ' + e.message;
+            }
+        },
+
+        async fetchShares(conn, body) {
+            conn.sharesLoading = true;
+            try {
+                const r = await fetch('{{ route("nas-fm.shares") }}', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': this.csrfToken() },
+                    body:    JSON.stringify(body),
+                });
+                const d = await r.json();
+                conn.shares = d.shares || [];
+            } catch (e) {
+                conn.shares = [];
+            } finally {
+                conn.sharesLoading = false;
             }
         },
 

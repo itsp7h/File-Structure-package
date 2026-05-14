@@ -111,16 +111,16 @@ class NasFileManagerController extends Controller
         $record = $dbId ? (NasConnection::find($dbId) ?? new NasConnection()) : new NasConnection();
 
         $record->fill([
-            'name'         => $request->input('name', 'NAS Connection'),
+            'name'         => $request->input('name') ?? 'NAS Connection',
             'enabled'      => (bool) $request->input('enabled', true),
-            'protocol'     => $request->input('protocol', 'sftp'),
-            'host'         => $request->input('host', ''),
-            'port'         => (int) $request->input('port', 22),
-            'username'     => $request->input('username', ''),
-            'share'        => $request->input('share', ''),
-            'smb_domain'   => $request->input('smb_domain', ''),
-            'subdirectory' => $request->input('subdirectory', '/media'),
-            'sort_order'   => (int) $request->input('sort_order', 0),
+            'protocol'     => $request->input('protocol') ?? 'sftp',
+            'host'         => $request->input('host') ?? '',
+            'port'         => (int) ($request->input('port') ?? 22),
+            'username'     => $request->input('username') ?? '',
+            'share'        => $request->input('share') ?? '',
+            'smb_domain'   => $request->input('smb_domain') ?? '',
+            'subdirectory' => $request->input('subdirectory') ?? '/media',
+            'sort_order'   => (int) ($request->input('sort_order') ?? 0),
         ]);
 
         // Only overwrite password if a new one was provided

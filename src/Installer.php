@@ -13,6 +13,7 @@ class Installer
             'yum'     => 'samba-client',
             'apk'     => 'samba-client',
             'pacman'  => 'smbclient',
+            'brew'    => 'samba',
         ],
         'sshpass' => [
             'apt-get' => 'sshpass',
@@ -20,17 +21,13 @@ class Installer
             'yum'     => 'sshpass',
             'apk'     => 'sshpass',
             'pacman'  => 'sshpass',
+            'brew'    => 'sshpass',
         ],
     ];
 
     public static function install(Event $event = null): void
     {
         $io = $event?->getIO();
-
-        if (PHP_OS_FAMILY !== 'Linux') {
-            self::write($io, "<info>[nas-file-manager]</info> Skipping system dependency install on " . PHP_OS_FAMILY . " — please install <comment>smbclient</comment> and <comment>sshpass</comment> manually if you need SMB or SFTP rename support.");
-            return;
-        }
 
         $pm = self::detectPackageManager();
 
@@ -48,7 +45,7 @@ class Installer
             }
 
             $package = $packages[$pm] ?? $binary;
-            $sudo    = $isRoot ? '' : 'sudo ';
+            $sudo    = ($pm !== 'brew' && !$isRoot) ? 'sudo ' : '';
             $cmd     = self::buildInstallCommand($pm, $package, $sudo);
 
             self::write($io, "<info>[nas-file-manager]</info> Installing <comment>$binary</comment> via $pm...");
@@ -65,9 +62,20 @@ class Installer
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
+    private static function brewPrefix(): string
+    {
+        // On Apple Silicon, PHP may run under Rosetta 2 (x86). Force ARM brew.
+        exec('uname -m 2>/dev/null', $out);
+        $arch = trim($out[0] ?? '');
+        if ($arch === 'arm64' || (PHP_OS === 'Darwin' && file_exists('/opt/homebrew/bin/brew'))) {
+            return 'arch -arm64 ';
+        }
+        return '';
+    }
+
     private static function detectPackageManager(): ?string
     {
-        foreach (['apt-get', 'dnf', 'yum', 'apk', 'pacman'] as $pm) {
+        foreach (['apt-get', 'dnf', 'yum', 'apk', 'pacman', 'brew'] as $pm) {
             if (self::commandExists($pm)) {
                 return $pm;
             }
@@ -83,6 +91,7 @@ class Installer
             'yum'     => "{$sudo}yum install -y $package",
             'apk'     => "{$sudo}apk add --no-cache $package",
             'pacman'  => "{$sudo}pacman -S --noconfirm $package",
+            'brew'    => self::brewPrefix() . "brew install $package",
             default   => "{$sudo}$pm install -y $package",
         };
     }
