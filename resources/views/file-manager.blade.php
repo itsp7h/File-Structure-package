@@ -112,7 +112,7 @@
 
         {{-- ── Tab switcher ── --}}
         <div class="flex items-center gap-1 px-6 pt-5 pb-0">
-            <button type="button" @click="tab = 'schema'"
+            <button type="button" @click="tab = 'schema'; initSchemaTree()"
                     :class="tab === 'schema' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'"
                     class="inline-flex items-center gap-1.5 text-xs font-medium px-3.5 py-2 rounded-xl transition-colors">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -145,27 +145,87 @@
         {{-- SCHEMA TAB                                                     --}}
         {{-- ══════════════════════════════════════════════════════════════ --}}
         <div x-show="tab === 'schema'" class="px-6 py-5" style="display:none">
-            <p class="text-xs text-slate-500 mb-4">
-                All paths are relative to each connection's subdirectory.
-                Placeholders in <span class="text-brand-600 font-mono">{curly braces}</span> are filled in at runtime.
-            </p>
-            <div class="font-mono text-xs text-slate-700 bg-slate-50 rounded-xl p-4 border border-slate-100 overflow-x-auto">
-                <template x-for="(node, i) in nodes" :key="node.id ?? i">
-                    <div class="flex items-center gap-1.5 leading-relaxed"
-                         :style="{ paddingLeft: (node.depth * 16) + 'px' }">
-                        <svg class="w-3.5 h-3.5 flex-shrink-0"
-                             :class="node.is_template ? 'text-slate-300' : (node.depth <= 1 ? 'text-amber-500' : (node.depth <= 3 ? 'text-amber-400' : 'text-amber-300'))"
-                             fill="currentColor" viewBox="0 0 20 20">
+
+            {{-- Loading --}}
+            <div x-show="schemaLoading" class="flex items-center gap-2 py-6 justify-center text-xs text-slate-400" style="display:none">
+                <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Loading structure…
+            </div>
+
+            {{-- Error --}}
+            <div x-show="schemaError && !schemaLoading" class="p-3 bg-red-50 border border-red-100 rounded-xl text-xs text-red-700 mb-4" x-text="schemaError" style="display:none"></div>
+
+            {{-- Live tree --}}
+            <div x-show="!schemaLoading && schemaNodes.length > 0"
+                 class="bg-slate-950 rounded-xl p-4 overflow-x-auto border border-slate-800" style="display:none">
+                <template x-for="(node, i) in schemaNodes" :key="node.path + '_' + i">
+                    <div class="flex items-center leading-[1.65rem] whitespace-nowrap group"
+                         :class="node.type === 'dir' ? 'cursor-pointer' : 'cursor-default'"
+                         @click="toggleSchemaNode(node)">
+
+                        {{-- Tree connector prefix --}}
+                        <span class="font-mono text-sm text-slate-600 select-none whitespace-pre flex-shrink-0"
+                              x-text="node.prefix"></span>
+
+                        {{-- Spinner while loading children --}}
+                        <svg x-show="node.loading" class="w-3 h-3 animate-spin text-slate-500 mr-1.5 flex-shrink-0" style="display:none"
+                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+
+                        {{-- Folder icon --}}
+                        <svg x-show="node.type === 'dir' && !node.loading"
+                             class="w-3.5 h-3.5 flex-shrink-0 mr-1.5 transition-colors"
+                             :class="node.expanded ? 'text-amber-400' : 'text-amber-500'"
+                             fill="currentColor" viewBox="0 0 20 20" style="display:none">
                             <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
                         </svg>
-                        <span :class="node.is_template ? 'text-brand-500 italic' : (node.depth === 0 ? 'text-slate-800 font-bold' : (node.depth === 1 ? 'text-slate-800 font-semibold' : 'text-slate-600'))"
-                              x-text="node.label + (node.is_template ? '' : '/')"></span>
+
+                        {{-- File icon --}}
+                        <svg x-show="node.type !== 'dir'" class="w-3.5 h-3.5 flex-shrink-0 mr-1.5 text-slate-500" style="display:none"
+                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                        </svg>
+
+                        {{-- Name --}}
+                        <span class="font-mono text-sm"
+                              :class="node.type === 'dir'
+                                ? (node.depth === 0 ? 'text-amber-200 font-semibold group-hover:text-amber-100' : 'text-amber-300 group-hover:text-amber-200')
+                                : 'text-slate-400'">
+                            <span x-text="node.name"></span><span x-show="node.type === 'dir'" class="text-slate-600">/</span>
+                        </span>
+
+                        {{-- File size --}}
+                        <span x-show="node.type !== 'dir' && node.size > 0"
+                              class="ml-3 font-mono text-[10px] text-slate-600 flex-shrink-0"
+                              x-text="formatSize(node.size)" style="display:none"></span>
                     </div>
                 </template>
-                <template x-if="nodes.length === 0">
-                    <p class="text-slate-400 italic">No schema defined.</p>
-                </template>
             </div>
+
+            {{-- No connection fallback --}}
+            <div x-show="!schemaLoading && !schemaError && schemaNodes.length === 0" style="display:none">
+                <div class="font-mono text-xs text-slate-700 bg-slate-50 rounded-xl p-4 border border-slate-100 overflow-x-auto">
+                    <template x-for="(node, i) in nodes" :key="node.id ?? i">
+                        <div class="flex items-center gap-1.5 leading-relaxed"
+                             :style="{ paddingLeft: (node.depth * 16) + 'px' }">
+                            <svg class="w-3.5 h-3.5 flex-shrink-0"
+                                 :class="node.is_template ? 'text-slate-300' : (node.depth <= 1 ? 'text-amber-500' : (node.depth <= 3 ? 'text-amber-400' : 'text-amber-300'))"
+                                 fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+                            </svg>
+                            <span :class="node.is_template ? 'text-brand-500 italic' : (node.depth === 0 ? 'text-slate-800 font-bold' : (node.depth === 1 ? 'text-slate-800 font-semibold' : 'text-slate-600'))"
+                                  x-text="node.label + (node.is_template ? '' : '/')"></span>
+                        </div>
+                    </template>
+                    <template x-if="nodes.length === 0">
+                        <p class="text-slate-400 italic">No schema defined and no NAS connection configured.</p>
+                    </template>
+                </div>
+            </div>
+
         </div>
 
         {{-- ══════════════════════════════════════════════════════════════ --}}
@@ -766,6 +826,9 @@ function nasFmComponent(nodes, connections) {
         nextId:      (connections || []).length + 1,
 
         init() {
+            if (this.connections.some(c => c.host.trim())) {
+                this.initSchemaTree();
+            }
             this.connections.forEach(conn => {
                 if (conn.protocol === 'smb' && conn.host.trim()) {
                     const body = {
@@ -781,6 +844,11 @@ function nasFmComponent(nodes, connections) {
                 }
             });
         },
+
+        // Schema tree
+        schemaNodes:   [],
+        schemaLoading: false,
+        schemaError:   '',
 
         // Live browser
         items:         [],
@@ -852,6 +920,92 @@ function nasFmComponent(nodes, connections) {
             conn.pickerItems  = [];
             conn.pickerPath   = '';
             conn.pickerSegments = [];
+        },
+
+        // ── Schema live tree ─────────────────────────────────────────────
+
+        async initSchemaTree() {
+            if (this.schemaNodes.length > 0 || this.schemaLoading) return;
+            this.schemaLoading = true;
+            this.schemaError   = '';
+            try {
+                const r = await fetch('{{ route("nas-fm.list-items") }}', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': this.csrfToken() },
+                    body:    JSON.stringify({ path: '' }),
+                });
+                const d = await r.json();
+                if (d.success) {
+                    this.schemaNodes = (d.items || []).map(item => ({
+                        ...item, depth: 0, prefix: '', expanded: false, loading: false, childrenLoaded: false,
+                    }));
+                    this.refreshSchemaPrefixes();
+                } else {
+                    this.schemaError = d.message || 'Failed to load structure.';
+                }
+            } catch (e) {
+                this.schemaError = 'Request error: ' + e.message;
+            } finally {
+                this.schemaLoading = false;
+            }
+        },
+
+        async toggleSchemaNode(node) {
+            if (node.type !== 'dir') return;
+            const idx = this.schemaNodes.indexOf(node);
+
+            if (node.expanded) {
+                node.expanded = false;
+                let end = idx + 1;
+                while (end < this.schemaNodes.length && this.schemaNodes[end].depth > node.depth) end++;
+                this.schemaNodes.splice(idx + 1, end - idx - 1);
+                this.refreshSchemaPrefixes();
+                return;
+            }
+
+            node.expanded = true;
+            node.loading  = true;
+            try {
+                const r = await fetch('{{ route("nas-fm.list-items") }}', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': this.csrfToken() },
+                    body:    JSON.stringify({ path: node.path }),
+                });
+                const d = await r.json();
+                if (d.success) {
+                    const children = (d.items || []).map(item => ({
+                        ...item, depth: node.depth + 1, prefix: '', expanded: false, loading: false, childrenLoaded: false,
+                    }));
+                    this.schemaNodes.splice(idx + 1, 0, ...children);
+                    node.childrenLoaded = true;
+                    this.refreshSchemaPrefixes();
+                }
+            } catch (e) {
+                node.expanded = false;
+            } finally {
+                node.loading = false;
+            }
+        },
+
+        refreshSchemaPrefixes() {
+            const nodes = this.schemaNodes;
+            for (let i = 0; i < nodes.length; i++) {
+                const d = nodes[i].depth;
+                let prefix = '';
+                for (let level = 0; level < d; level++) {
+                    let hasSibling = false;
+                    for (let j = i + 1; j < nodes.length; j++) {
+                        if (nodes[j].depth <= level) { hasSibling = nodes[j].depth === level; break; }
+                    }
+                    prefix += hasSibling ? '│   ' : '    ';
+                }
+                let isLast = true;
+                for (let j = i + 1; j < nodes.length; j++) {
+                    if (nodes[j].depth <= d) { isLast = nodes[j].depth < d; break; }
+                }
+                prefix += isLast ? '└── ' : '├── ';
+                nodes[i].prefix = prefix;
+            }
         },
 
         async testConn(conn) {
